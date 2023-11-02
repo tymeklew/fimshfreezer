@@ -1,0 +1,44 @@
+<html>
+
+<head>
+   <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+</head>
+
+<body>
+   <style>
+   </style>
+   <input id="file-input" type="file" multiple name="files" />
+   <div id="parent"> </div>
+   <script>
+      const el = document.getElementById("file-input");
+      const parent = document.getElementById("parent");
+      el.addEventListener("change", handleUpload);
+      async function handleUpload(e) {
+         console.log("Upload ");
+         let files = e.target.files;
+         for (let i = 0; i < e.target.files.length; i++) {
+            try {
+               console.log("Uploading " + files[i].name);
+               let res = await fetch(`/upload?name=${files[i].name}`, {
+                  method: "PUT",
+                  body: files[i],
+               })
+               add_real(await res.text())
+            } catch (error) {
+               console.log(error)
+            }
+         }
+      }
+      function add_real(name) {
+         let base = document.createElement("div");
+         base.classlist = "base"
+         let text = document.createElement("a")
+         text.innerText = name;
+         text.href = window.location.toString().slice(0, -1) + name
+         base.appendChild(text)
+         parent.appendChild(base)
+      }
+   </script>
+</body>
+
+</html>

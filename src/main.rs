@@ -1,104 +1,83 @@
-use actix_files::{Files, NamedFile};
-use actix_web::{
-    get,
-    http::StatusCode,
-    middleware::Logger,
-    put,
-    web::{self, Bytes},
-    App, HttpResponse, HttpResponseBuilder, HttpServer,
-};
-use async_std::{fs::File, io::WriteExt};
-use log::info;
-use serde::Deserialize;
-use std::fs::read_to_string;
-use std::path::PathBuf;
-#[derive(Deserialize, Clone)]
-struct Config {
-    max_file_size: u32, // Size in bytes
-    file_dir: String,
-}
-impl Config {
-    fn load(path: String) -> Result<Self> {
-        Ok(toml::from_str::<Config>(&read_to_string(path)?)?)
-    }
-}
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            max_file_size: 1_000_000_000, //1GB
-            file_dir: "/Users/tymek/projects/Rust/fimshfreezer/files".to_string(),
-        }
-    }
-}
+use log::{debug, error, info};
+use std::collections::HashMap;
+use std::io::{BufRead, BufReader, ErrorKind, Read, Write};
+use std::net::{TcpListener, TcpStream};
+const R: u8 = b'\r';
+const N: u8 = b'\n';
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
-#[actix_web::main]
-async fn main() -> Result<()> {
-    dotenv::dotenv()?;
-    env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
-    let config = Config::load("config.toml".to_string()).unwrap_or_default();
-    let _ = HttpServer::new(move || {
-        App::new()
-            .app_data(web::Data::new(config.clone()))
-            .app_data(web::PayloadConfig::new(
-                config.max_file_size.clone() as usize
-            ))
-            .wrap(Logger::default())
-            .service(upload)
-            .service(Files::new("/files", "./files"))
-            .service(Files::new("/static", "./static"))
-            .service(index)
-    })
-    .bind(("127.0.0.1", 80))?
-    .run()
-    .await?;
-    Ok(())
+
+#[derive(Debug)]
+pub enum Method {
+    Get,
+    Post,
+    Put,
+}
+#[derive(Debug)]
+struct Request {}
+impl Request {
+    fn parse<T: Read + std::fmt::Debug>(input: T) -> Result<Self> {
+        let reader = BufReader::new(input);
+        let mut temp = Vec::new();
+        let mut bytes = reader.bytes();
+        let mut top = Vec::new();
+        let body: Vec<u8>;
+        for b in bytes.by_ref() {
+            if let Ok(b) = b {
+                if temp.len() == 4 {
+                    let headers = Self::parse_headers(top);
+                    let size = headers
+                        .get("Content-Length")
+                        .unwrap_or(&"0".to_string())
+                        .parse::<usize>()
+                        .unwrap_or(0);
+                    body = bytes.take(size - 1).map(|f| f.unwrap()).collect();
+                    info!("Headers : {:?}", headers);
+                    info!("Body : {}", String::from_utf8_lossy(&body));
+                    break;
+                } else if b == R || b == N {
+                    temp.push(b);
+                } else {
+                    temp = Vec::new();
+                }
+                top.push(b);
+                println!("{:?}", b);
+            }
+        }
+
+        todo!()
+    }
+    fn parse_headers(input: Vec<u8>) -> HashMap<String, String> {
+        let mut headers = HashMap::new();
+        for line in input.lines() {
+            println!("LIne : {:?}", line);
+            match line {
+                Ok(line) => match line.split_once(":") {
+                    Some((k, v)) => {
+                        headers.insert(k.trim().to_string(), v.trim().to_string());
+                    }
+                    None => continue,
+                },
+                Err(_) => continue,
+            }
+        }
+        return headers;
+    }
 }
 
-#[derive(Deserialize)]
-struct UploadQuery {
-    name: String,
-}
-#[put("/upload")]
-async fn upload(
-    query: web::Query<UploadQuery>,
-    bytes: Bytes,
-    config: web::Data<Config>,
-) -> Result<HttpResponse> {
-    let mut path: PathBuf = format!("./files/{}", query.name).into();
-    let mut count = 0;
-    // Guard against doing a silly
-    if !path
-        .canonicalize()
-        .unwrap()
-        .starts_with(config.file_dir.clone())
-    {
-        return Ok(HttpResponse::Unauthorized().into());
+fn main() -> Result<()> {
+    env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
+    let listener = TcpListener::bind("127.0.0.1:8080")?;
+    info!("Starting server on port 8080");
+    for stream in listener.incoming() {
+        match stream {
+            Ok(stream) => handle_stream(stream)?,
+            Err(e) => error!("{e}"),
+        }
     }
-    loop {
-        path = PathBuf::from(format!(
-            "./files/{}{}",
-            match count {
-                0 => String::new(),
-                c => format!("({c})"),
-            },
-            query.name
-        ));
-        if !path.exists() {
-            break;
-        };
-        count += 1;
-    }
-    File::create(path.clone()).await?.write_all(&bytes).await?;
-    Ok(HttpResponseBuilder::new(StatusCode::OK).body(
-        path.to_string_lossy()
-            .to_string()
-            .chars()
-            .skip(1)
-            .collect::<String>(),
-    ))
+    Ok(())
 }
-#[get("/{_}*")]
-async fn index() -> Result<NamedFile> {
-    Ok(NamedFile::open("./static/index.html")?)
+fn handle_stream(stream: TcpStream) -> Result<()> {
+    Request::parse(stream).unwrap();
+    Ok(())
 }

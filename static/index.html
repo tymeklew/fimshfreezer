@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+
+<head> </head>
+
+<body>
+   <input type="file" multiple id="file-input" />
+   <script>
+      let input = document.getElementById("file-input")
+
+      input.addEventListener("change", async (e) => {
+         let files = e.target.files;
+         for (let i = 0; i < files.length; i++) {
+            console.log(`Uploading ${files[i].name}`);
+            try {
+               let res = await fetch(`/upload/${files[i].name}`, {
+                  method: "PUT",
+                  body: files[i]
+               });
+               console.log((await res.text()).slice(1))
+            } catch (error) {
+               console.error(error)
+            }
+         }
+      })
+   </script>
+</body>
+
+</html>
